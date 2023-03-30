@@ -70,6 +70,10 @@
             {
                 "command": "typst-lsp.exportCurrentPdf",
                 "title": "Export the currently open file as PDF"
+            },
+            {
+                "command": "typst-lsp.showPreview",
+                "title": "Show Preview"
             }
         ],
         "menus": {

@@ -3,7 +3,10 @@ use std::fmt::Display;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use futures::future::join_all;
 use regex::{Captures, Regex};
 use serde_json::Value as JsonValue;
@@ -15,6 +18,7 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 use typst::diag::SourceError;
 use typst::doc::Frame;
 use typst::eval::{CastInfo, FuncInfo, Value};
+use typst::geom::Color;
 use typst::ide::autocomplete;
 use typst::ide::CompletionKind::*;
 use typst::ide::{tooltip, Tooltip};
@@ -23,9 +27,11 @@ use typst::World;
 use typst_library::prelude::EcoString;
 
 use crate::command::LspCommand;
+use crate::preview_request::*;
 
 mod command;
 mod config;
+mod preview_request;
 mod system_world;
 
 struct Backend {
@@ -246,6 +252,8 @@ impl Backend {
     }
 
     async fn compile_diags_export(&self, uri: Url, text: String, export: bool) {
+        let mut now = Instant::now();
+        eprintln!("Compiling {}...", uri);
         let mut world_lock = self.world.write().await;
         let world = world_lock.as_mut().unwrap();
 
@@ -270,10 +278,13 @@ impl Backend {
         }
 
         let mut fs_message: Option<LogMessage<String>> = None; // log success or error of file write
-        match typst::compile(world) {
+        let pdf = match typst::compile(world) {
             Ok(document) => {
-                let buffer = typst::export::pdf(&document);
+
+                eprintln!("Compiled in {}ms\nExporting (pdf? {})...", now.elapsed().as_millis(), export);
+                now = Instant::now();
                 if export {
+                    let buffer = typst::export::pdf(&document);
                     let output_path = uri.to_file_path().unwrap().with_extension("pdf");
                     fs_message = match fs::write(&output_path, buffer)
                         .map_err(|_| "failed to write PDF file".to_string())
@@ -288,6 +299,10 @@ impl Backend {
                         }),
                     };
                 }
+                let ret = Some(BASE64.encode(typst::export::pdf(&document)));
+                eprintln!("Generating images in {}ms", now.elapsed().as_millis());
+                now = Instant::now();
+                ret
             }
             Err(errors) => {
                 for source_err in errors.iter() {
@@ -297,8 +312,19 @@ impl Backend {
                         .or_default()
                         .push((message, range));
                 }
+                None
             }
         };
+
+        if let Some(pdf) = pdf {
+            self.client
+                .send_request::<ShowPreview>(ShowPreviewParams {
+                    pdf,
+                })
+                .await;
+            eprintln!("Sending {}ms\n", now.elapsed().as_millis());
+        }
+
         // release the lock early
         drop(world_lock);
 
@@ -422,6 +448,7 @@ impl Backend {
 
         Some(help)
     }
+
 }
 
 /// Turn a `typst::ide::Completion` into a `lsp_types::CompletionItem`
