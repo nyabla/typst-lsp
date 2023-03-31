@@ -1,6 +1,8 @@
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
@@ -278,10 +280,13 @@ impl Backend {
         }
 
         let mut fs_message: Option<LogMessage<String>> = None; // log success or error of file write
-        let pdf = match typst::compile(world) {
+        let previewParams = match typst::compile(world) {
             Ok(document) => {
-
-                eprintln!("Compiled in {}ms\nExporting (pdf? {})...", now.elapsed().as_millis(), export);
+                eprintln!(
+                    "Compiled in {}ms\nExporting (pdf? {})...",
+                    now.elapsed().as_millis(),
+                    export
+                );
                 now = Instant::now();
                 if export {
                     let buffer = typst::export::pdf(&document);
@@ -299,7 +304,14 @@ impl Backend {
                         }),
                     };
                 }
-                let ret = Some(BASE64.encode(typst::export::pdf(&document)));
+                let ret = Some(ShowPreviewParams {
+                    pdf: BASE64.encode(typst::export::pdf(&document)),
+                    page_hashes: document
+                        .pages
+                        .iter()
+                        .map(|p| page_hash(p))
+                        .collect::<Vec<u64>>(),
+                });
                 eprintln!("Generating images in {}ms", now.elapsed().as_millis());
                 now = Instant::now();
                 ret
@@ -316,12 +328,8 @@ impl Backend {
             }
         };
 
-        if let Some(pdf) = pdf {
-            self.client
-                .send_request::<ShowPreview>(ShowPreviewParams {
-                    pdf,
-                })
-                .await;
+        if let Some(previewParams) = previewParams {
+            self.client.send_request::<ShowPreview>(previewParams).await;
             eprintln!("Sending {}ms\n", now.elapsed().as_millis());
         }
 
@@ -448,7 +456,6 @@ impl Backend {
 
         Some(help)
     }
-
 }
 
 /// Turn a `typst::ide::Completion` into a `lsp_types::CompletionItem`
@@ -599,4 +606,10 @@ fn error_to_range(error: &SourceError, world: &SystemWorld) -> (Url, String, Ran
     let range = range_to_lsp_range(range, source);
     let uri = Url::from_file_path(source.path()).expect("Unable to create Url from Path");
     (uri, error.message.to_string(), range)
+}
+
+fn page_hash<T: Hash>(t: &T) -> u64 {
+    let mut s = DefaultHasher::new();
+    t.hash(&mut s);
+    s.finish()
 }

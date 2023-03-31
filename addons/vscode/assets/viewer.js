@@ -6,7 +6,7 @@ window.addEventListener('message', event => {
 
     switch (message.command) {
         case 'updatePages':
-            loadPdf(message.pdf)
+            loadPdf(message.pdf, message.pages_to_update)
             break;
     }
 });
@@ -18,7 +18,7 @@ var pdfjsLib = window['pdfjs-dist/build/pdf'];
 pdfjsLib.GlobalWorkerOptions.workerSrc = window.PdfjsWorkerUrl;
 
 
-async function loadPdf(pdfData) {
+async function loadPdf(pdfData, pages_to_update) {
     try {
         //var pdfjsLib = window['pdfjs-dist/build/pdf'];
         //console.log(pdfjsLib);
@@ -78,8 +78,9 @@ async function loadPdf(pdfData) {
                 }
             }
         }
-        for(let i=1; i<=pdf.numPages; i++) {
-            await renderPage(i);
+        for(let i=0; i<pdf.numPages; i++) {
+            if(!pages_to_update || pages_to_update[i])
+                await renderPage(i+1);
         }
         let outOfBoundsPage = pdf.numPages + 1;
         let outOfBoundsCanvas;

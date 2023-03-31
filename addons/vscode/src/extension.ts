@@ -22,6 +22,7 @@ import {
 let client: LanguageClient | undefined = undefined;
 let currentPanel: WebviewPanel | undefined = undefined;
 let lastPdf: String = '';
+let lastPageHashes: Array<number> = [];
 
 export function activate(context: ExtensionContext): Promise<void> {
     const serverCommand = getServer();
@@ -57,8 +58,8 @@ export function activate(context: ExtensionContext): Promise<void> {
         }
     });
 
-    client.onRequest("custom/showPreview", ({pdf}) => {
-        updatePreview(pdf);
+    client.onRequest("custom/showPreview", ({pdf, page_hashes}) => {
+        updatePreview(pdf, page_hashes);
     });
 
     context.subscriptions.push(
@@ -141,16 +142,19 @@ async function commandShowPreview(context: ExtensionContext): Promise<void> {
     }
 }
 
-async function updatePreview(pdf: String): Promise<void> {
+async function updatePreview(pdf: String, page_hashes: Array<number>): Promise<void> {
 
     const activeEditor = window.activeTextEditor;
     if (activeEditor === undefined) {
         return;
     }
     lastPdf = pdf;
+    const pages_to_update: Array<boolean> = [];
+    page_hashes.forEach((p,i) => pages_to_update.push(lastPageHashes[i] != p));
+    lastPageHashes = page_hashes;
     if(currentPanel)
     {
-        currentPanel.webview.postMessage({ command: 'updatePages', pdf:lastPdf });
+        currentPanel.webview.postMessage({ command: 'updatePages', pdf, pages_to_update });
     }
 }
 
@@ -171,6 +175,7 @@ function getWebviewContent(context: ExtensionContext) : string {
       </script>
       <script src="${extensionPath}/assets/pdfjs/pdf.js"></script>
       <script src="${extensionPath}/assets/viewer.js"></script>
+      <link href="${extensionPath}/assets/viewer.css" rel="stylesheet">
       <style>
         body {
             margin: 0;

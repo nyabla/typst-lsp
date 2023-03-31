@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
 pub struct ShowPreviewParams {
     pub pdf: String,
+    pub page_hashes: Vec<u64>,
 }
 
 #[derive(Debug, Eq, PartialEq, Clone, Deserialize, Serialize)]
