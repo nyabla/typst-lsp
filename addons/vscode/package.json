@@ -73,7 +73,7 @@
             },
             {
                 "command": "typst-lsp.showPreview",
-                "title": "Show Preview"
+                "title": "Typst: Show Preview"
             }
         ],
         "menus": {
