@@ -384,6 +384,7 @@ checksum = "531ac96c6ff5fd7c62263c5e3c67a603af4fcaee2e1a0ae5565ba3a11e69e549"
 dependencies = [
  "futures-channel",
  "futures-core",
+ "futures-executor",
  "futures-io",
  "futures-sink",
  "futures-task",
@@ -405,6 +406,17 @@ name = "futures-core"
 version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86d7a0c1aa76363dac491de0ee99faf6941128376f1cf96f07db7603b7de69dd"
+
+[[package]]
+name = "futures-executor"
+version = "0.3.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1997dd9df74cdac935c76252744c1ed5794fac083242ea4fe77ef3ed60ba0f83"
+dependencies = [
+ "futures-core",
+ "futures-task",
+ "futures-util",
+]
 
 [[package]]
 name = "futures-io"
@@ -1611,7 +1623,7 @@ dependencies = [
 
 [[package]]
 name = "typst-lsp"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "append-only-vec",
  "base64 0.21.0",
@@ -1619,12 +1631,15 @@ dependencies = [
  "comemo",
  "dirs",
  "elsa",
+ "futures",
+ "lsp-types",
  "memmap2",
  "notify",
  "once_cell",
  "parking_lot",
  "regex",
  "same-file",
+ "serde",
  "serde_json",
  "siphasher",
  "tokio",

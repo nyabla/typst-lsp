@@ -1,8 +1,15 @@
+use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::fmt::Display;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
+use futures::future::join_all;
 use regex::{Captures, Regex};
 use serde_json::Value as JsonValue;
 use system_world::SystemWorld;
@@ -13,6 +20,7 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 use typst::diag::SourceError;
 use typst::doc::Frame;
 use typst::eval::{CastInfo, FuncInfo, Value};
+use typst::geom::Color;
 use typst::ide::autocomplete;
 use typst::ide::CompletionKind::*;
 use typst::ide::{tooltip, Tooltip};
@@ -21,9 +29,11 @@ use typst::World;
 use typst_library::prelude::EcoString;
 
 use crate::command::LspCommand;
+use crate::preview_request::*;
 
 mod command;
 mod config;
+mod preview_request;
 mod system_world;
 
 struct Backend {
@@ -244,8 +254,16 @@ impl Backend {
     }
 
     async fn compile_diags_export(&self, uri: Url, text: String, export: bool) {
+        let mut now = Instant::now();
+        eprintln!("Compiling {}...", uri);
         let mut world_lock = self.world.write().await;
         let world = world_lock.as_mut().unwrap();
+
+        let mut file_diagnostics = HashMap::<Url, Vec<_>>::new();
+        // Clear the previous diagnostics (could be done with the refresh notification when implemented by tower-lsp)
+        for source in world.sources.iter() {
+            file_diagnostics.insert(Url::from_file_path(source.path()).unwrap(), vec![]);
+        }
 
         world.reset();
 
@@ -262,10 +280,16 @@ impl Backend {
         }
 
         let mut fs_message: Option<LogMessage<String>> = None; // log success or error of file write
-        let messages: Vec<_> = match typst::compile(world) {
+        let previewParams = match typst::compile(world) {
             Ok(document) => {
-                let buffer = typst::export::pdf(&document);
+                eprintln!(
+                    "Compiled in {}ms\nExporting (pdf? {})...",
+                    now.elapsed().as_millis(),
+                    export
+                );
+                now = Instant::now();
                 if export {
+                    let buffer = typst::export::pdf(&document);
                     let output_path = uri.to_file_path().unwrap().with_extension("pdf");
                     fs_message = match fs::write(&output_path, buffer)
                         .map_err(|_| "failed to write PDF file".to_string())
@@ -280,10 +304,35 @@ impl Backend {
                         }),
                     };
                 }
-                vec![]
+                let ret = Some(ShowPreviewParams {
+                    pdf: BASE64.encode(typst::export::pdf(&document)),
+                    page_hashes: document
+                        .pages
+                        .iter()
+                        .map(|p| page_hash(p))
+                        .collect::<Vec<u64>>(),
+                });
+                eprintln!("Generating images in {}ms", now.elapsed().as_millis());
+                now = Instant::now();
+                ret
             }
-            Err(errors) => errors.iter().map(|x| error_to_range(x, world)).collect(),
+            Err(errors) => {
+                for source_err in errors.iter() {
+                    let (uri, message, range) = error_to_range(source_err, world);
+                    file_diagnostics
+                        .entry(uri)
+                        .or_default()
+                        .push((message, range));
+                }
+                None
+            }
         };
+
+        if let Some(previewParams) = previewParams {
+            self.client.send_request::<ShowPreview>(previewParams).await;
+            eprintln!("Sending {}ms\n", now.elapsed().as_millis());
+        }
+
         // release the lock early
         drop(world_lock);
 
@@ -292,21 +341,26 @@ impl Backend {
             self.client.log_message(msg.message_type, msg.message).await;
         }
 
-        self.client
-            .publish_diagnostics(
-                uri.clone(),
-                messages
-                    .into_iter()
-                    .map(|(message, range)| Diagnostic {
-                        range,
-                        severity: Some(DiagnosticSeverity::ERROR),
-                        message,
-                        ..Default::default()
-                    })
-                    .collect(),
-                None,
-            )
-            .await;
+        let mut notifications = vec![];
+
+        for (uri, diags) in file_diagnostics.into_iter() {
+            notifications.push(
+                self.client.publish_diagnostics(
+                    uri,
+                    diags
+                        .into_iter()
+                        .map(|(message, range)| Diagnostic {
+                            range,
+                            severity: Some(DiagnosticSeverity::ERROR),
+                            message,
+                            ..Default::default()
+                        })
+                        .collect(),
+                    None,
+                ),
+            );
+        }
+        join_all(notifications).await;
     }
 
     async fn signature_help(&self, _uri: Url, position: Position) -> Option<SignatureHelp> {
@@ -546,9 +600,16 @@ async fn main() {
     Server::new(stdin, stdout, socket).serve(service).await;
 }
 
-fn error_to_range(error: &SourceError, world: &SystemWorld) -> (String, Range) {
+fn error_to_range(error: &SourceError, world: &SystemWorld) -> (Url, String, Range) {
     let source = world.source(error.span.source());
     let range = source.range(error.span);
     let range = range_to_lsp_range(range, source);
-    (error.message.to_string(), range)
+    let uri = Url::from_file_path(source.path()).expect("Unable to create Url from Path");
+    (uri, error.message.to_string(), range)
+}
+
+fn page_hash<T: Hash>(t: &T) -> u64 {
+    let mut s = DefaultHasher::new();
+    t.hash(&mut s);
+    s.finish()
 }

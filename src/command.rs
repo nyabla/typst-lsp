@@ -1,7 +1,7 @@
 use std::{fs, path::Path};
 
-use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use serde_json::Value;
 use tower_lsp::{
     jsonrpc::{Error, Result},
@@ -102,7 +102,7 @@ impl Backend {
                     .map(|buf| BASE64.encode(buf))
                     .map(|encoded| Value::String("data:image/png;base64,".to_string() + &encoded))
                     .collect();
- 
+
                 return Ok(Some(serde_json::Value::Array(data_urls)));
             }
             Err(_errors) => {}

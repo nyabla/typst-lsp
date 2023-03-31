@@ -10,7 +10,7 @@
     "author": "Nathan Varner",
     "publisher": "nvarner",
     "license": "Apache-2.0 OR MIT",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "engines": {
         "vscode": "^1.71.0"
     },
@@ -70,6 +70,10 @@
             {
                 "command": "typst-lsp.exportCurrentPdf",
                 "title": "Export the currently open file as PDF"
+            },
+            {
+                "command": "typst-lsp.showPreview",
+                "title": "Typst: Show Preview"
             }
         ],
         "menus": {
